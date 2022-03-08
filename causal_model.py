@@ -155,7 +155,7 @@ def train(epochs:int, warmup:int, load:bool):
                 break
 
             source = batch[:, :-1]
-            expected = modules.mu_law_encode(batch[:, -1])
+            expected = modules.a_law_encode(batch[:, -1])
 
             output = net(source.to(device))
 
@@ -189,14 +189,14 @@ def test(wav, pred_len):
     print("="*25)
 
     audio,sr = librosa.load(wav, sr=RESAMPLE, duration=20)
-    source = modules.mu_law_encode(torch.tensor(audio[-SEQ_LEN:])).to(device)
+    source = modules.a_law_encode(torch.tensor(audio[-SEQ_LEN:])).to(device)
 
     with torch.no_grad():
         for pred in range(pred_len):
             output = net(source.unsqueeze(0)).flatten(start_dim=0)
             output = torch.softmax(output, dim=0).cpu().numpy()
 
-            chosen = modules.mu_law_decode(numpy.random.choice(numpy.arange(256), size=1, p=output))
+            chosen = modules.a_law_decode(numpy.random.choice(numpy.arange(256), size=1, p=output))
             #print(chosen.item(), end=",")
 
             audio = numpy.append(audio, chosen.item())

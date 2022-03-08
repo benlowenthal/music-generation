@@ -66,3 +66,41 @@ def mu_law_decode(input):
         out[x] = sign * (1 / 255) * (256 ** abs(input[x]) - 1)
 
     return torch.tensor(out)
+
+def a_law_encode(input):
+    out = numpy.empty_like(input.cpu(), dtype=numpy.float16)
+    A = 87.6
+
+    for x in range(len(input)):
+        sign = 1
+        if input[x] < 0:
+            sign = -1
+
+        if abs(input[x]) < 1./A:
+            out[x] = sign * A * abs(input[x]) / (1 + math.log(A))
+        elif abs(input[x]) < 1.:
+            out[x] = sign * (1 + math.log(A * abs(input[x]))) / (1 + math.log(A))
+        else:
+            raise ValueError
+
+    return torch.tensor(((out + 1) / 2) * 255, dtype=torch.uint8)
+
+def a_law_decode(input):
+    out = numpy.empty_like(input, dtype=numpy.float16)
+    A = 87.6
+
+    input = numpy.asarray(((input / 255) * 2) - 1, dtype=numpy.float16)
+
+    for x in range(len(input)):
+        sign = 1
+        if input[x] < 0:
+            sign = -1
+
+        if abs(input[x]) < 1./(1 + math.log(A)):
+            out[x] = sign * input[x] * (1 + math.log(A)) / A
+        elif abs(input[x]) < 1.:
+            out[x] = sign * math.pow(math.e, -1 + (abs(input[x]) * (1 + math.log(A)))) / A
+        else:
+            raise ValueError
+
+    return torch.tensor(out)
