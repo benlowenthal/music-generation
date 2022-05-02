@@ -12,17 +12,15 @@ from torch._C import device
 from torch.nn import functional
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
-from torch.utils.data.dataset import Dataset
 import matplotlib.pyplot as plt
 
 import modules
+import dataset
 
 
 BATCH_SIZE = 64
 SEQ_LEN = 512*4
-RESAMPLE = 2205
-
-total_batches = 0
+RESAMPLE = 220
 
 device = torch.device("cpu")
 if torch.cuda.is_available():
@@ -31,58 +29,14 @@ print("using device : " + str(device))
 torch.cuda.empty_cache()
 
 
-class AudioData(Dataset):
-    def __init__(self):
-        self.data = []
-        self.seq_len = SEQ_LEN+1
-        self.min_signal_len = 10**10
-
-        # all tracks
-        #for dir in tqdm.tqdm(os.listdir(os.sep.join([r".\archive", "genres"]))):
-        #    for wav in os.listdir(os.sep.join([r".\archive", "genres", dir])):
-        #        #audio loading w/o resample
-        #        signal,_ = librosa.load(os.sep.join([r".\archive", "genres", dir, wav]), sr=RESAMPLE)
-        #        self.data.append(signal)
-        #
-        #        if len(signal) < self.min_signal_len:
-        #            self.min_signal_len = len(signal)
-
-        # blues
-        #for wav in os.listdir(os.sep.join([r".\archive", "genres", "blues"])):
-        #    signal,_ = librosa.load(os.sep.join([r".\archive", "genres", "blues", wav]), sr=RESAMPLE)
-        #    self.data.append(signal)
-
-        #    if len(signal) < self.min_signal_len:
-        #        self.min_signal_len = len(signal)
-
-        # only blues 00000
-        self.data.append(librosa.load(os.sep.join([r".\archive", "genres", "blues", "blues.00000.wav"]), sr=RESAMPLE)[0])
-        self.min_signal_len = len(self.data[0])
-
-        self.data = numpy.array(self.data)
-
-        datapoints = len(self.data)*(self.min_signal_len-self.seq_len)
-        self.batches = math.ceil(datapoints / BATCH_SIZE)
-
-        print("data points:", datapoints)
-        print("possible batches:", self.batches)
-
-    def __len__(self):
-        return len(self.data)*(self.min_signal_len-self.seq_len)
-
-    def __getitem__(self, idx):
-        track = idx // (self.min_signal_len-self.seq_len)
-        pos = idx % (self.min_signal_len-self.seq_len)
-
-        return torch.tensor(self.data[track][pos:pos+self.seq_len], device=device)
-
-
 class Net(nn.Module):
     def __init__(self):         #receptive range = blocks * (2 ^ dilations)
         super().__init__()
         self.num_blocks = 4
         self.dilations = 8
         self.channels = 8
+
+        self.norm = nn.BatchNorm1d(2048);
 
         self.blocks = nn.ModuleList()
 
@@ -110,6 +64,8 @@ class Net(nn.Module):
         self.fc2 = nn.Linear(SEQ_LEN, 256)
 
     def forward(self, x):
+        x = self.norm(x)
+
         x = x.unsqueeze(1)
 
         x = self.conv(x)
@@ -133,7 +89,7 @@ def train(epochs:int, warmup:int, load:bool):
     net.train()
     
     warmup_sched = StepLR(optimizer, 1, 1.5)
-    scheduler = StepLR(optimizer, 1, 0.9)
+    scheduler = StepLR(optimizer, 1, 0.95)
 
     if load:
         saved = torch.load(r".\model-causal.pt")
@@ -144,7 +100,7 @@ def train(epochs:int, warmup:int, load:bool):
     for epoch in range(epochs):
         epoch_loss = 0.
 
-        for idx, batch in enumerate(train_loader):
+        for idx, (source, expected) in enumerate(train_loader):
             net.zero_grad() #reset gradient between batches
 
             if msvcrt.kbhit():
@@ -153,9 +109,6 @@ def train(epochs:int, warmup:int, load:bool):
                 except UnicodeDecodeError:
                     print("unknown key pressed, stopping training...")
                 break
-
-            source = batch[:, :-1]
-            expected = modules.a_law_encode(batch[:, -1])
 
             output = net(source.to(device))
 
@@ -189,10 +142,10 @@ def test(wav, pred_len):
     print("="*25)
 
     audio,sr = librosa.load(wav, sr=RESAMPLE, duration=20)
-    source = modules.a_law_encode(torch.tensor(audio[-SEQ_LEN:])).to(device)
+    source = torch.tensor(audio[-SEQ_LEN:]).to(device)
 
     with torch.no_grad():
-        for pred in range(pred_len):
+        for pred in range(math.ceil(pred_len * RESAMPLE)):
             output = net(source.unsqueeze(0)).flatten(start_dim=0)
             output = torch.softmax(output, dim=0).cpu().numpy()
 
@@ -208,12 +161,12 @@ def test(wav, pred_len):
     print("Audio file produced : output.wav", audio.shape)
 
 
-audio_dataset = AudioData()
+audio_dataset = dataset.AudioData(SEQ_LEN, RESAMPLE, BATCH_SIZE)
 train_loader = DataLoader(audio_dataset, shuffle=True, batch_size=BATCH_SIZE)
 
 net = Net()
 net.to(device)
-optimizer = optim.Adam(net.parameters(), lr=0.005, weight_decay=0.0001)
+optimizer = optim.Adam(net.parameters(), lr=0.05, weight_decay=0.0001)
 
-train(20, 0, False)
+#train(10, 0, False)
 #test(os.sep.join(["archive", "genres", "blues", "blues.00000.wav"]), RESAMPLE*5) #seconds

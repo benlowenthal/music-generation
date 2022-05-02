@@ -104,3 +104,14 @@ def a_law_decode(input):
             raise ValueError
 
     return torch.tensor(out)
+
+def cosine_dist(a, b):
+    if a.size(0) != b.size(0):
+        return None
+
+    total = torch.dot(a, b).item()
+
+    a_mag = math.sqrt(a.square().sum().item())
+    b_mag = math.sqrt(b.square().sum().item())
+
+    return total / (a_mag * b_mag)
